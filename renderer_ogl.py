@@ -88,7 +88,7 @@ class GaussianRenderBase:
     @reduce_updates.setter
     def reduce_updates(self, val):
         self._reduce_updates = val
-        self.update_vsync()
+        # self.update_vsync()
 
     def update_vsync(self):
         print("VSync is not supported")
@@ -102,6 +102,9 @@ class GaussianRenderBase:
     def set_scale_modifier(self, modifier: float):
         raise NotImplementedError()
     
+    def set_near_far_plane(self, near: float, far: float):
+        raise NotImplementedError()
+
     def set_render_mod(self, mod: int):
         raise NotImplementedError()
     
@@ -147,7 +150,7 @@ class OpenGLRenderer(GaussianRenderBase):
         gl.glEnable(gl.GL_BLEND)
         gl.glBlendFunc(gl.GL_SRC_ALPHA, gl.GL_ONE_MINUS_SRC_ALPHA)
 
-        self.update_vsync()
+        # self.update_vsync()
 
     def update_vsync(self):
         if wglSwapIntervalEXT is not None:
@@ -173,6 +176,10 @@ class OpenGLRenderer(GaussianRenderBase):
    
     def set_scale_modifier(self, modifier):
         util.set_uniform_1f(self.program, modifier, "scale_modifier")
+
+    def set_near_far_plane(self, near: float, far: float):
+        util.set_uniform_1f(self.program, near, "near_plane")
+        util.set_uniform_1f(self.program, far, "far_plane")
 
     def set_render_mod(self, mod: int):
         util.set_uniform_1int(self.program, mod, "render_mod")

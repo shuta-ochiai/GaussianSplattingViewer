@@ -50,6 +50,8 @@ uniform vec3 cam_pos;
 uniform int sh_dim;
 uniform float scale_modifier;
 uniform int render_mod;  // > 0 render 0-ith SH dim, -1 depth, -2 bill board, -3 gaussian
+uniform float near_plane;
+uniform float far_plane;
 
 out vec3 color;
 out float alpha;
@@ -97,8 +99,20 @@ void main()
 	int boxid = gi[gl_InstanceID];
 	int total_dim = 3 + 6 + 1 + sh_dim;
 	int start = boxid * total_dim;
+	alpha = g_data[start + OPACITY_IDX];
+	// alpha culling
+	if (alpha < 1.f / 255.f)
+	{
+		gl_Position = vec4(-100, -100, -100, 1);
+		return;
+	}
 	vec4 g_pos = vec4(get_vec3(start + POS_IDX), 1.f);
     vec4 g_pos_view = view_matrix * g_pos;
+	// near/far plane culling
+	if (g_pos_view.z >= -near_plane || g_pos_view.z <= -far_plane) {
+		gl_Position = vec4(-100, -100, -100, 1);
+		return;
+		}
     vec4 g_pos_screen = projection_matrix * g_pos_view;
 	g_pos_screen.xyz = g_pos_screen.xyz / g_pos_screen.w;
     g_pos_screen.w = 1.f;
@@ -109,7 +123,6 @@ void main()
 		return;
 	}
 
-	float g_opacity = g_data[start + OPACITY_IDX];
 	vec3 g_sigma_diag = get_vec3(start + SIGMA_IDX);
 	vec3 g_sigma_off_diag = get_vec3(start + SIGMA_IDX + 3);
     mat3 cov3d = mat3(
@@ -125,6 +138,15 @@ void main()
                               hfovxy_focal.y, 
                               cov3d, 
                               view_matrix);
+	// 小さいもの（直径 < 1px）は描画しない（カメラ負荷軽減）
+	// cov2d.x / cov2d.z はそれぞれスクリーン空間での分散（単位: px^2）
+	float cov2d_x = sqrt(max(cov2d.x, 0.0));
+	float cov2d_y = sqrt(max(cov2d.z, 0.0));
+	// 直径 = 2 * sqrt(cov2d). 直径 < 1px => cov2d < 0.25px^2
+	if (max(cov2d_x, cov2d_y) < 0.25) {
+		gl_Position = vec4(-100, -100, -100, 1);
+		return;
+		}
 
     // Invert covariance (EWA algorithm)
 	float det = (cov2d.x * cov2d.z - cov2d.y * cov2d.y);
@@ -140,7 +162,7 @@ void main()
     coordxy = position * quadwh_scr;
     gl_Position = g_pos_screen;
     
-    alpha = g_opacity;
+
 
 	if (render_mod == -1)
 	{

@@ -46,7 +46,7 @@ def impl_glfw_init():
         exit(1)
 
     glfw.window_hint(glfw.CONTEXT_VERSION_MAJOR, 4)
-    glfw.window_hint(glfw.CONTEXT_VERSION_MINOR, 3)
+    glfw.window_hint(glfw.CONTEXT_VERSION_MINOR, 6)
     glfw.window_hint(glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE)
     # glfw.window_hint(glfw.OPENGL_FORWARD_COMPAT, gl.GL_TRUE)
 
@@ -102,6 +102,7 @@ def update_activated_renderer_state(gaus: util_gau.GaussianData):
     g_renderer.update_gaussian_data(gaus)
     g_renderer.sort_and_update(g_camera)
     g_renderer.set_scale_modifier(g_scale_modifier)
+    g_renderer.set_near_far_plane(g_camera.znear, g_camera.zfar)
     g_renderer.set_render_mod(g_render_mode - 3)
     g_renderer.update_camera_pose(g_camera)
     g_renderer.update_camera_intrin(g_camera)
@@ -121,6 +122,10 @@ def main():
     if args.hidpi:
         imgui.get_io().font_global_scale = 1.5
     window = impl_glfw_init()
+    print(f"OpenGL version: {gl.glGetString(gl.GL_VERSION).decode()}")
+    print(f"GLSL version: {gl.glGetString(gl.GL_SHADING_LANGUAGE_VERSION).decode()}")
+    print(f"GPU Vendor: {gl.glGetString(gl.GL_VENDOR).decode()}")
+    print(f"GPU Renderer: {gl.glGetString(gl.GL_RENDERER).decode()}")
     impl = GlfwRenderer(window)
     root = tk.Tk()  # used for file dialog
     root.withdraw()
@@ -213,6 +218,19 @@ def main():
                 changed, g_scale_modifier = imgui.slider_float(
                     "", g_scale_modifier, 0.1, 10, "scale modifier = %.3f"
                 )
+
+                # near/far plane
+                changed_near, near_plane = imgui.slider_float(
+                    "near plane", g_camera.znear, 0.01, 10.0, "near plane = %.3f"
+                )
+                changed_far, far_plane = imgui.slider_float(
+                    "far plane", g_camera.zfar, 10.0, 100.0, "far plane = %.3f"
+                )
+                if changed_near or changed_far:
+                    g_camera.znear = near_plane
+                    g_camera.zfar = far_plane
+                    g_renderer.set_near_far_plane(near_plane, far_plane)
+
                 imgui.same_line()
                 if imgui.button(label="reset"):
                     g_scale_modifier = 1.
