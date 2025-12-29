@@ -37,7 +37,7 @@ layout (std430, binding=1) readonly buffer SigmaBuffer {
     float g_sigma_data[];
 };
 layout (std430, binding=2) readonly buffer OpacityBuffer {
-	float g_opacity_data[];
+	uint g_opacity_data[];
 };
 layout (std430, binding=3) readonly buffer SHBuffer {
     float g_sh_data[];
@@ -93,10 +93,17 @@ vec3 get_sh_vec3(int offset)
 	return vec3(g_sh_data[offset], g_sh_data[offset + 1], g_sh_data[offset + 2]);
 }
 
+uint get_opacity(int idx)
+{
+	uint packed_opacity = g_opacity_data[idx/4];
+	int shift = (idx % 4) * 8;
+	return (packed_opacity >> shift) & 0xFFu;
+}
+
 void main()
 {
 	int boxid = gi[gl_InstanceID];
-	alpha = g_opacity_data[boxid];
+	alpha = float(get_opacity(boxid)) / 255.f;
 	// alpha culling
 	if (alpha < 1.f / 255.f)
 	{

@@ -27,8 +27,8 @@ class GaussianData:
 
     @property
     def opacity_buffer(self):
-        # OpacityBuffer (N x 1)
-        return np.ascontiguousarray(self.opacity.reshape(-1))
+        # OpacityBuffer (N x 1) → 4つずつまとめてuint32
+        return self.pack_opacity_uint8_to_uint32(self.opacity.reshape(-1))
 
     @property
     def sh_buffer(self):
@@ -39,6 +39,12 @@ class GaussianData:
     def sh_dim(self):
         return self.sh.shape[-1]
 
+    def pack_opacity_uint8_to_uint32(self, opacity_uint8: np.ndarray) -> np.ndarray:
+        # 長さを4の倍数にパディング
+        pad = (-len(opacity_uint8)) % 4
+        if pad:
+            opacity_uint8 = np.pad(opacity_uint8, (0, pad), 'constant')
+        return opacity_uint8.view(np.uint32)
 
 def naive_gaussian():
     gau_xyz = np.array([
@@ -70,6 +76,7 @@ def naive_gaussian():
     gau_a = np.array([
         1, 1, 1, 1
     ]).astype(np.float32).reshape(-1, 1)
+    gau_a = (gau_a * 255).clip(0, 255).astype(np.uint8)
     return GaussianData(
         gau_xyz,
         gau_sigma,
@@ -174,7 +181,7 @@ def load_ply(path):
     scales = scales.astype(np.float32)
     sigmas = compute_cov3d_in_gpu(scales, rots)
     opacities = 1/(1 + np.exp(- opacities))  # sigmoid
-    opacities = opacities.astype(np.float32)
+    opacities = (opacities * 255).clip(0, 255).astype(np.uint8)
     shs = np.concatenate([features_dc.reshape(-1, 3), 
                         features_extra.reshape(len(features_dc), -1)], axis=-1).astype(np.float32)
     shs = shs.astype(np.float32)
