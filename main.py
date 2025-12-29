@@ -134,13 +134,13 @@ def main():
 
     # init renderer
     g_renderer_list[BACKEND_OGL] = OpenGLRenderer(g_camera.w, g_camera.h)
-    try:
-        from renderer_cuda import CUDARenderer
-        g_renderer_list += [CUDARenderer(g_camera.w, g_camera.h)]
-    except ImportError:
-        g_renderer_idx = BACKEND_OGL
-    else:
-        g_renderer_idx = BACKEND_CUDA
+    # try:
+    #     from renderer_cuda import CUDARenderer
+    #     g_renderer_list += [CUDARenderer(g_camera.w, g_camera.h)]
+    # except ImportError:
+    g_renderer_idx = BACKEND_OGL
+    # else:
+    #     g_renderer_idx = BACKEND_CUDA
 
     g_renderer = g_renderer_list[g_renderer_idx]
 
@@ -193,10 +193,7 @@ def main():
 
                 imgui.text(f"# of Gaus = {len(gaussians)}")
                 if imgui.button(label='open ply'):
-                    file_path = filedialog.askopenfilename(title="open ply",
-                        initialdir="C:\\Users\\MSI_NB\\Downloads\\viewers",
-                        filetypes=[('ply file', '.ply')]
-                        )
+                    file_path = ("../GaussianSplattingViewer/data/office.ply")
                     if file_path:
                         try:
                             gaussians = util_gau.load_ply(file_path)

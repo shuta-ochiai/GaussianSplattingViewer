@@ -1,16 +1,18 @@
 import numpy as np
 from plyfile import PlyData
 from dataclasses import dataclass
+from OpenGL.GL import *
+import OpenGL.GL.shaders as shaders
+import ctypes
 
 @dataclass
 class GaussianData:
     xyz: np.ndarray
-    rot: np.ndarray
-    scale: np.ndarray
+    sigma: np.ndarray
     opacity: np.ndarray
     sh: np.ndarray
     def flat(self) -> np.ndarray:
-        ret = np.concatenate([self.xyz, self.rot, self.scale, self.opacity, self.sh], axis=-1)
+        ret = np.concatenate([self.xyz, self.sigma, self.opacity, self.sh], axis=-1)
         return np.ascontiguousarray(ret)
     
     def __len__(self):
@@ -34,12 +36,13 @@ def naive_gaussian():
         1, 0, 0, 0,
         1, 0, 0, 0
     ]).astype(np.float32).reshape(-1, 4)
-    gau_s = np.array([
+    gau_scale = np.array([
         0.03, 0.03, 0.03,
         0.2, 0.03, 0.03,
         0.03, 0.2, 0.03,
         0.03, 0.03, 0.2
     ]).astype(np.float32).reshape(-1, 3)
+    gau_sigma = compute_cov3d_in_gpu(gau_scale, gau_rot)
     gau_c = np.array([
         1, 0, 1, 
         1, 0, 0, 
@@ -52,15 +55,61 @@ def naive_gaussian():
     ]).astype(np.float32).reshape(-1, 1)
     return GaussianData(
         gau_xyz,
-        gau_rot,
-        gau_s,
+        gau_sigma,
         gau_a,
         gau_c
     )
 
+def compute_cov3d_in_gpu(scales: np.ndarray, rots: np.ndarray) -> int:
+    input_data = np.concatenate((scales, rots), axis=1).astype(np.float32)
+    # 入力 ssbo (binding point 0)
+    input_buffer = glGenBuffers(1)
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, input_buffer)
+    glBufferData(GL_SHADER_STORAGE_BUFFER, input_data.nbytes, input_data, GL_STATIC_DRAW)
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, input_buffer)
+    # 出力 ssbo (binding point 1)
+    output_size = scales.shape[0] * 6 * 4  # N x 6 x sizeof(float)
+    output_buffer = glGenBuffers(1)
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, output_buffer)
+    glBufferData(GL_SHADER_STORAGE_BUFFER, output_size, None, GL_STATIC_DRAW)
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, output_buffer)
+
+    num_gaussians = scales.shape[0]
+    # ワークグループサイズを定義 (256 threds per workgroup)
+    LOCAL_SIZE = 256
+    num_groups = (num_gaussians + LOCAL_SIZE - 1) // LOCAL_SIZE
+    compute_shader = open("shaders/compute_cov3d.glsl", "r").read()
+    compute_shader_program = shaders.compileProgram(
+        shaders.compileShader(compute_shader, GL_COMPUTE_SHADER)
+    )
+    glUseProgram(compute_shader_program)
+    glDispatchCompute(num_groups, 1, 1) # 計算を開始
+    glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT) # 計算の完了を待つ
+
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, output_buffer)
+
+    # glMapBufferRange を使用してデータを読み取り
+    data_ptr = glMapBufferRange(GL_SHADER_STORAGE_BUFFER, 0, output_size, GL_MAP_READ_BIT)
+
+    c_pointer = ctypes.c_void_p(data_ptr)
+    num_elements = num_gaussians * 6
+    c_array = ctypes.cast(c_pointer, ctypes.POINTER(ctypes.c_float * num_elements))
+
+    sigmas = np.frombuffer(c_array.contents, dtype=np.float32).copy()
+    sigmas = sigmas.reshape((num_gaussians, 6))
+
+    # マッピング解除
+    glUnmapBuffer(GL_SHADER_STORAGE_BUFFER)
+
+    # GPUリソースを解放
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0)
+    glDeleteBuffers(1, [input_buffer])
+    glDeleteBuffers(1, [output_buffer])
+    glDeleteProgram(compute_shader_program)
+
+    return sigmas
 
 def load_ply(path):
-    max_sh_degree = 3
     plydata = PlyData.read(path)
     xyz = np.stack((np.asarray(plydata.elements[0]["x"]),
                     np.asarray(plydata.elements[0]["y"]),
@@ -74,7 +123,13 @@ def load_ply(path):
 
     extra_f_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("f_rest_")]
     extra_f_names = sorted(extra_f_names, key = lambda x: int(x.split('_')[-1]))
+    extra_coeffs_num = len(extra_f_names)
+    if extra_coeffs_num > 0:
+        max_sh_degree = int(np.sqrt(extra_coeffs_num / 3 + 1) - 1)
+    else:
+        max_sh_degree = 0
     assert len(extra_f_names)==3 * (max_sh_degree + 1) ** 2 - 3
+
     features_extra = np.zeros((xyz.shape[0], len(extra_f_names)))
     for idx, attr_name in enumerate(extra_f_names):
         features_extra[:, idx] = np.asarray(plydata.elements[0][attr_name])
@@ -100,12 +155,13 @@ def load_ply(path):
     rots = rots.astype(np.float32)
     scales = np.exp(scales)
     scales = scales.astype(np.float32)
+    sigmas = compute_cov3d_in_gpu(scales, rots)
     opacities = 1/(1 + np.exp(- opacities))  # sigmoid
     opacities = opacities.astype(np.float32)
     shs = np.concatenate([features_dc.reshape(-1, 3), 
                         features_extra.reshape(len(features_dc), -1)], axis=-1).astype(np.float32)
     shs = shs.astype(np.float32)
-    return GaussianData(xyz, rots, scales, opacities, shs)
+    return GaussianData(xyz, sigmas, opacities, shs)
 
 if __name__ == "__main__":
     gs = load_ply("C:\\Users\\MSI_NB\\Downloads\\viewers\\models\\train\\point_cloud\\iteration_7000\\point_cloud.ply")
