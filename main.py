@@ -193,7 +193,7 @@ def main():
 
                 imgui.text(f"# of Gaus = {len(gaussians)}")
                 if imgui.button(label='open ply'):
-                    file_path = ("../GaussianSplattingViewer/data/office.ply")
+                    file_path = ("../GaussianSplattingViewer/data/office_scaled.ply")
                     if file_path:
                         try:
                             gaussians = util_gau.load_ply(file_path)
