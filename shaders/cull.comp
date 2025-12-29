@@ -1,0 +1,56 @@
+#version 430 core
+
+layout(local_size_x = 256) in;
+
+layout(std430, binding = 0) readonly buffer PosBuffer { float g_pos_data[]; };
+layout (std430, binding=2) readonly buffer OpacityBuffer { uint g_opacity_data[]; };
+layout(std430, binding = 4) readonly buffer GaussianOrder { int gi[]; };
+// 出力先：可視状態のガウスのインデックス
+layout(std430, binding = 5) writeonly buffer VisibleBuffer { int visible_gi[]; };
+// Indirect Command
+layout(std430, binding = 6) buffer IndirectBuffer {
+    uint count;
+    uint instanceCount; // これをアトミックに加算する
+    uint first;
+    uint baseInstance;
+} cmd;
+
+uniform mat4 view_matrix;
+uniform mat4 projection_matrix;
+uniform float near_plane;
+uniform float far_plane;
+uniform int num_gaussians;
+
+uint get_opacity(int idx)
+{
+	uint packed_opacity = g_opacity_data[idx/4];
+	int shift = (idx % 4) * 8;
+	return (packed_opacity >> shift) & 0xFFu;
+}
+
+void main() {
+    uint idx = gl_GlobalInvocationID.x;
+    if (idx >= num_gaussians) return;
+
+    int boxid = gi[idx];
+    // float alpha = float(get_opacity(boxid)) / 255.f;
+    // // alpha culling
+    // if (alpha < 1.f / 255.f)
+    //     return;
+    // vec4 g_pos = vec4(g_pos_data[boxid * 3], g_pos_data[boxid * 3 + 1], g_pos_data[boxid * 3 + 2], 1.0);
+    // vec4 g_pos_view = view_matrix * g_pos;
+    // // near/far plane culling
+	// if (g_pos_view.z >= -near_plane || g_pos_view.z <= -far_plane) {
+    //     return;
+    // }
+    // // screen bounds culling
+    // vec4 g_pos_screen = projection_matrix * g_pos_view;
+    // g_pos_screen.xyz = g_pos_screen.xyz / g_pos_screen.w;
+    // if (any(greaterThan(abs(g_pos_screen.xyz), vec3(1.3))))
+	// {
+	// 	return;
+	// }
+
+    uint write_idx = atomicAdd(cmd.instanceCount, 1);
+    visible_gi[write_idx] = boxid;
+}

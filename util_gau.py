@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from OpenGL.GL import *
 import OpenGL.GL.shaders as shaders
 import ctypes
+import util
 
 @dataclass
 class GaussianData:
@@ -102,10 +103,7 @@ def compute_cov3d_in_gpu(scales: np.ndarray, rots: np.ndarray) -> int:
     # ワークグループサイズを定義 (256 threds per workgroup)
     LOCAL_SIZE = 256
     num_groups = (num_gaussians + LOCAL_SIZE - 1) // LOCAL_SIZE
-    compute_shader = open("shaders/cov3d.comp", "r").read()
-    compute_shader_program = shaders.compileProgram(
-        shaders.compileShader(compute_shader, GL_COMPUTE_SHADER)
-    )
+    compute_shader_program = util.load_compute_shader("shaders/cov3d.comp")
     glUseProgram(compute_shader_program)
     glDispatchCompute(num_groups, 1, 1) # 計算を開始
     glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT) # 計算の完了を待つ

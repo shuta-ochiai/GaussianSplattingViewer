@@ -127,6 +127,16 @@ class OpenGLRenderer(GaussianRenderBase):
         gl.glViewport(0, 0, w, h)
         self.program = util.load_shaders('shaders/gau_vert.glsl', 'shaders/gau_frag.glsl')
 
+        self.cull_program = util.load_compute_shader('shaders/cull.comp')
+        self.indirect_buffer = gl.glGenBuffers(1)
+        gl.glBindBuffer(gl.GL_DRAW_INDIRECT_BUFFER, self.indirect_buffer)
+        # [頂点数, インスタンス数, 開始頂点, 開始インスタンス]
+        # 頂点数は quad_f の要素数 (6)
+        initial_cmd = np.array([6, 0, 0, 0], dtype=np.uint32)
+        gl.glBufferData(gl.GL_DRAW_INDIRECT_BUFFER, initial_cmd.nbytes, initial_cmd, gl.GL_DYNAMIC_DRAW)
+        # --- 可視インデックス保存用 SSBO ---
+        self.visible_buffer = gl.glGenBuffers(1)
+
         # Vertex data for a quad
         self.quad_v = np.array([
             -1,  1,
@@ -138,7 +148,7 @@ class OpenGLRenderer(GaussianRenderBase):
             0, 1, 2,
             0, 2, 3
         ], dtype=np.uint32).reshape(2, 3)
-        
+
         # load quad geometry
         vao, buffer_id = util.set_attributes(self.program, ["position"], [self.quad_v])
         util.set_faces_tovao(vao, self.quad_f)
@@ -165,6 +175,7 @@ class OpenGLRenderer(GaussianRenderBase):
 
     def update_gaussian_data(self, gaus: util_gau.GaussianData):
         self.gaussians = gaus
+        num_gaus = len(gaus)
 
         self.gau_buffers['pos'] = util.set_storage_buffer_data(
             self.program, "PosBuffer", gaus.pos_buffer,
@@ -190,21 +201,26 @@ class OpenGLRenderer(GaussianRenderBase):
             buffer_id=self.gau_buffers['sh']
         )
 
+        gl.glBindBuffer(gl.GL_SHADER_STORAGE_BUFFER, self.visible_buffer)
+        gl.glBufferData(gl.GL_SHADER_STORAGE_BUFFER, num_gaus * 4, None, gl.GL_STREAM_DRAW)
+        gl.glBindBufferBase(gl.GL_SHADER_STORAGE_BUFFER, 5, self.visible_buffer)
+
         util.set_uniform_1int(self.program, gaus.sh_dim, "sh_dim")
+        util.set_uniform_1int(self.cull_program, num_gaus, "num_gaussians")
 
     def sort_and_update(self, camera: util.Camera):
         index = _sort_gaussian(self.gaussians, camera.get_view_matrix())
         self.index_bufferid = util.set_storage_buffer_data(self.program, "gi", index, 
-                                                           bind_idx=4,
-                                                           buffer_id=self.index_bufferid)
+                                                        bind_idx=4,
+                                                        buffer_id=self.index_bufferid)
         return
 
     def set_scale_modifier(self, modifier):
         util.set_uniform_1f(self.program, modifier, "scale_modifier")
 
     def set_near_far_plane(self, near: float, far: float):
-        util.set_uniform_1f(self.program, near, "near_plane")
-        util.set_uniform_1f(self.program, far, "far_plane")
+        util.set_uniform_1f(self.cull_program, near, "near_plane")
+        util.set_uniform_1f(self.cull_program, far, "far_plane")
 
     def set_render_mod(self, mod: int):
         util.set_uniform_1int(self.program, mod, "render_mod")
@@ -215,15 +231,46 @@ class OpenGLRenderer(GaussianRenderBase):
     def update_camera_pose(self, camera: util.Camera):
         view_mat = camera.get_view_matrix()
         util.set_uniform_mat4(self.program, view_mat, "view_matrix")
+        util.set_uniform_mat4(self.cull_program, view_mat, "view_matrix")
         util.set_uniform_v3(self.program, camera.position, "cam_pos")
 
     def update_camera_intrin(self, camera: util.Camera):
         proj_mat = camera.get_project_matrix()
         util.set_uniform_mat4(self.program, proj_mat, "projection_matrix")
+        util.set_uniform_mat4(self.cull_program, proj_mat, "projection_matrix")
         util.set_uniform_v3(self.program, camera.get_htanfovxy_focal(), "hfovxy_focal")
 
     def draw(self):
-        gl.glUseProgram(self.program)
-        gl.glBindVertexArray(self.vao)
         num_gau = len(self.gaussians)
-        gl.glDrawElementsInstanced(gl.GL_TRIANGLES, len(self.quad_f.reshape(-1)), gl.GL_UNSIGNED_INT, None, num_gau)
+
+        # --- STEP 1: Compute Shader によるカリング ---
+        gl.glUseProgram(self.cull_program)
+        # バッファの再バインド（確実にするため）
+        gl.glBindBufferBase(gl.GL_SHADER_STORAGE_BUFFER, 0, self.gau_buffers['pos'])
+        gl.glBindBufferBase(gl.GL_SHADER_STORAGE_BUFFER, 2, self.gau_buffers['opacity'])
+        gl.glBindBufferBase(gl.GL_SHADER_STORAGE_BUFFER, 4, self.index_bufferid) # ソート済みインデックス
+        gl.glBindBufferBase(gl.GL_SHADER_STORAGE_BUFFER, 5, self.visible_buffer) # 出力先
+        gl.glBindBufferBase(gl.GL_SHADER_STORAGE_BUFFER, 6, self.indirect_buffer)
+
+        initial_cmd = np.array([6, 0, 0, 0], dtype=np.uint32)
+        gl.glBindBuffer(gl.GL_DRAW_INDIRECT_BUFFER, self.indirect_buffer)
+        gl.glBufferSubData(gl.GL_DRAW_INDIRECT_BUFFER, 0, initial_cmd.nbytes, initial_cmd)
+        num_groups = (num_gau + 255) // 256
+        # culling 実行
+        gl.glDispatchCompute(num_groups, 1, 1)
+        # 実行完了を待機
+        gl.glMemoryBarrier(gl.GL_COMMAND_BARRIER_BIT | gl.GL_SHADER_STORAGE_BARRIER_BIT | gl.GL_CLIENT_MAPPED_BUFFER_BARRIER_BIT | gl.GL_ALL_BARRIER_BITS)
+
+        # --- STEP 2: レンダリング ---
+        gl.glUseProgram(self.program)
+        gl.glBindBufferBase(gl.GL_SHADER_STORAGE_BUFFER, 5, self.visible_buffer)
+        gl.glBindVertexArray(self.vao)
+        gl.glBindBuffer(gl.GL_DRAW_INDIRECT_BUFFER, self.indirect_buffer)
+        
+        # tmp = np.zeros(4, dtype=np.uint32)
+        # gl.glBindBuffer(gl.GL_DRAW_INDIRECT_BUFFER, self.indirect_buffer)
+        # gl.glGetBufferSubData(gl.GL_DRAW_INDIRECT_BUFFER, 0, tmp.nbytes, tmp)
+        # print(f"Indirect Command: Count={tmp[0]}, InstanceCount={tmp[1]}, First={tmp[2]}, BaseInstance={tmp[3]}")
+
+        gl.glDrawElementsIndirect(gl.GL_TRIANGLES, gl.GL_UNSIGNED_INT, None)
+        

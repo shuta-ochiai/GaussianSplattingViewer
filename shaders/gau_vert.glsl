@@ -42,8 +42,8 @@ layout (std430, binding=2) readonly buffer OpacityBuffer {
 layout (std430, binding=3) readonly buffer SHBuffer {
     float g_sh_data[];
 };
-layout (std430, binding=4) readonly buffer gaussian_order {
-	int gi[];
+layout (std430, binding=5) readonly buffer VisibleBuffer {
+    int visible_gi[];
 };
 
 uniform mat4 view_matrix;
@@ -53,8 +53,6 @@ uniform vec3 cam_pos;
 uniform int sh_dim;
 uniform float scale_modifier;
 uniform int render_mod;  // > 0 render 0-ith SH dim, -1 depth, -2 bill board, -3 gaussian
-uniform float near_plane;
-uniform float far_plane;
 
 out vec3 color;
 out float alpha;
@@ -102,30 +100,14 @@ uint get_opacity(int idx)
 
 void main()
 {
-	int boxid = gi[gl_InstanceID];
+	int boxid = visible_gi[gl_InstanceID];
 	alpha = float(get_opacity(boxid)) / 255.f;
-	// alpha culling
-	if (alpha < 1.f / 255.f)
-	{
-		gl_Position = vec4(-100, -100, -100, 1);
-		return;
-	}
 	vec4 g_pos = vec4(g_pos_data[boxid * 3], g_pos_data[boxid * 3 + 1], g_pos_data[boxid * 3 + 2], 1.f);
     vec4 g_pos_view = view_matrix * g_pos;
-	// near/far plane culling
-	if (g_pos_view.z >= -near_plane || g_pos_view.z <= -far_plane) {
-		gl_Position = vec4(-100, -100, -100, 1);
-		return;
-		}
+
     vec4 g_pos_screen = projection_matrix * g_pos_view;
 	g_pos_screen.xyz = g_pos_screen.xyz / g_pos_screen.w;
     g_pos_screen.w = 1.f;
-	// early culling
-	if (any(greaterThan(abs(g_pos_screen.xyz), vec3(1.3))))
-	{
-		gl_Position = vec4(-100, -100, -100, 1);
-		return;
-	}
 
 	float sxx = g_sigma_data[boxid * 6 + 0];
 	float syy = g_sigma_data[boxid * 6 + 1];
@@ -140,13 +122,13 @@ void main()
 	) * scale_modifier * scale_modifier;
 
     vec2 wh = 2 * hfovxy_focal.xy * hfovxy_focal.z;
-    vec3 cov2d = computeCov2D(g_pos_view, 
-                              hfovxy_focal.z, 
-                              hfovxy_focal.z, 
-                              hfovxy_focal.x, 
-                              hfovxy_focal.y, 
-                              cov3d, 
-                              view_matrix);
+    vec3 cov2d = computeCov2D(g_pos_view,
+                            hfovxy_focal.z,
+                            hfovxy_focal.z,
+                            hfovxy_focal.x,
+                            hfovxy_focal.y,
+                            cov3d,
+                            view_matrix);
 	// 小さいもの（直径 < 1px）は描画しない（カメラ負荷軽減）
 	// cov2d.x / cov2d.z はそれぞれスクリーン空間での分散（単位: px^2）
 	float cov2d_x = sqrt(max(cov2d.x, 0.0));
