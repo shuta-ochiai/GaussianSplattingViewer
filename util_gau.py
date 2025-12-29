@@ -102,7 +102,7 @@ def compute_cov3d_in_gpu(scales: np.ndarray, rots: np.ndarray) -> int:
     # ワークグループサイズを定義 (256 threds per workgroup)
     LOCAL_SIZE = 256
     num_groups = (num_gaussians + LOCAL_SIZE - 1) // LOCAL_SIZE
-    compute_shader = open("shaders/compute_cov3d.glsl", "r").read()
+    compute_shader = open("shaders/cov3d.comp", "r").read()
     compute_shader_program = shaders.compileProgram(
         shaders.compileShader(compute_shader, GL_COMPUTE_SHADER)
     )
