@@ -31,7 +31,7 @@ g_renderer_list = [
 g_renderer_idx = BACKEND_OGL
 g_renderer: GaussianRenderBase = g_renderer_list[g_renderer_idx]
 g_scale_modifier = 1.
-g_auto_sort = False
+g_auto_sort = True
 g_show_control_win = True
 g_show_help_win = True
 g_show_camera_win = False
@@ -193,7 +193,7 @@ def main():
 
                 imgui.text(f"# of Gaus = {len(gaussians)}")
                 if imgui.button(label='open ply'):
-                    file_path = ("../GaussianSplattingViewer/data/office.ply")
+                    file_path = ("../GaussianSplattingViewer/data/office_scaled.ply")
                     if file_path:
                         try:
                             gaussians = util_gau.load_ply(file_path)
