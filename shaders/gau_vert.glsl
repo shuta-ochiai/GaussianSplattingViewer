@@ -99,15 +99,20 @@ void main()
 	int start = boxid * total_dim;
 	vec4 g_pos = vec4(get_vec3(start + POS_IDX), 1.f);
     vec4 g_pos_view = view_matrix * g_pos;
+	// cull back faces
+	if (g_pos_view.z >= 0.0) {
+		gl_Position = vec4(-100, -100, -100, 1);
+		return;
+		}
     vec4 g_pos_screen = projection_matrix * g_pos_view;
 	g_pos_screen.xyz = g_pos_screen.xyz / g_pos_screen.w;
     g_pos_screen.w = 1.f;
 	// early culling
-	if (any(greaterThan(abs(g_pos_screen.xyz), vec3(1.3))))
-	{
-		gl_Position = vec4(-100, -100, -100, 1);
-		return;
-	}
+	// if (any(greaterThan(abs(g_pos_screen.xyz), vec3(1.3))))
+	// {
+	// 	gl_Position = vec4(-100, -100, -100, 1);
+	// 	return;
+	// }
 
 	float g_opacity = g_data[start + OPACITY_IDX];
 	vec3 g_sigma_diag = get_vec3(start + SIGMA_IDX);
@@ -125,6 +130,15 @@ void main()
                               hfovxy_focal.y, 
                               cov3d, 
                               view_matrix);
+	// 小さいもの（直径 < 1px）は描画しない（カメラ負荷軽減）
+	// cov2d.x / cov2d.z はそれぞれスクリーン空間での分散（sigma^2, 単位: px^2）
+	float sigma_x = sqrt(max(cov2d.x, 0.0));
+	float sigma_y = sqrt(max(cov2d.z, 0.0));
+	// 直径 = 2 * sigma. 直径 < 1px => sigma < 0.5px
+	if (max(sigma_x, sigma_y) < 0.5) {
+		gl_Position = vec4(-100, -100, -100, 1);
+		return;
+		}
 
     // Invert covariance (EWA algorithm)
 	float det = (cov2d.x * cov2d.z - cov2d.y * cov2d.y);
