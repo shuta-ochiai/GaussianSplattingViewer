@@ -11,14 +11,31 @@ class GaussianData:
     sigma: np.ndarray
     opacity: np.ndarray
     sh: np.ndarray
-    def flat(self) -> np.ndarray:
-        ret = np.concatenate([self.xyz, self.sigma, self.opacity, self.sh], axis=-1)
-        return np.ascontiguousarray(ret)
-    
+
     def __len__(self):
         return len(self.xyz)
-    
-    @property 
+
+    @property
+    def pos_buffer(self):
+        # PosBuffer (N x 3)
+        return np.ascontiguousarray(self.xyz.reshape(-1))
+
+    @property
+    def sigma_buffer(self):
+        # SigmaBuffer (N x 6)
+        return np.ascontiguousarray(self.sigma.reshape(-1))
+
+    @property
+    def opacity_buffer(self):
+        # OpacityBuffer (N x 1)
+        return np.ascontiguousarray(self.opacity.reshape(-1))
+
+    @property
+    def sh_buffer(self):
+        # SHBuffer (N x sh_dim)
+        return np.ascontiguousarray(self.sh.reshape(-1))
+
+    @property
     def sh_dim(self):
         return self.sh.shape[-1]
 
